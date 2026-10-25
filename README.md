@@ -11,7 +11,9 @@ Keys and speeds are in `BepInEx/config/neo.cartpilot.cfg`. Logs go to `BepInEx/C
 
 ## Install
 
-Get it from Thunderstore, or put `CartPilot.dll` in `BepInEx/plugins` (needs BepInExPack 5.4.2305).
+Easiest: install it from Thunderstore with a mod manager (r2modman or Thunderstore Mod Manager). It installs BepInEx for you.
+
+Manual: install [BepInExPack](https://thunderstore.io/c/repo/p/BepInEx/BepInExPack/) 5.4.2305 into the game folder, start the game once, then put `CartPilot.dll` in `BepInEx/plugins`.
 
 ## Build
 
