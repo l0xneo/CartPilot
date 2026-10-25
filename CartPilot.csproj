@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>CartPilot</AssemblyName>
+    <RootNamespace>CartPilot</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+
+    <GameDir>C:\Program Files (x86)\Steam\steamapps\common\REPO</GameDir>
+    <ManagedDir>$(GameDir)\REPO_Data\Managed</ManagedDir>
+    <ProfileDir>$(APPDATA)\Thunderstore Mod Manager\DataFolder\REPO\profiles\Default</ProfileDir>
+    <BepInExCore>$(ProfileDir)\BepInEx\core</BepInExCore>
+    <PluginDir>$(ProfileDir)\BepInEx\plugins\CartPilot</PluginDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Lets us read the game's internal fields (currentState, cartBeingPulled, ...) without reflection. -->
+    <PackageReference Include="BepInEx.AssemblyPublicizer.MSBuild" Version="0.4.2" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp" HintPath="$(ManagedDir)\Assembly-CSharp.dll" Publicize="true" Private="false" />
+    <Reference Include="Unity.AI.Navigation" HintPath="$(ManagedDir)\Unity.AI.Navigation.dll" Private="false" />
+    <Reference Include="Unity.InputSystem" HintPath="$(ManagedDir)\Unity.InputSystem.dll" Private="false" />
+    <Reference Include="UnityEngine" HintPath="$(ManagedDir)\UnityEngine.dll" Private="false" />
+    <Reference Include="UnityEngine.CoreModule" HintPath="$(ManagedDir)\UnityEngine.CoreModule.dll" Private="false" />
+    <Reference Include="UnityEngine.PhysicsModule" HintPath="$(ManagedDir)\UnityEngine.PhysicsModule.dll" Private="false" />
+    <Reference Include="UnityEngine.AIModule" HintPath="$(ManagedDir)\UnityEngine.AIModule.dll" Private="false" />
+    <Reference Include="UnityEngine.IMGUIModule" HintPath="$(ManagedDir)\UnityEngine.IMGUIModule.dll" Private="false" />
+    <Reference Include="UnityEngine.TextRenderingModule" HintPath="$(ManagedDir)\UnityEngine.TextRenderingModule.dll" Private="false" />
+    <Reference Include="PhotonUnityNetworking" HintPath="$(ManagedDir)\PhotonUnityNetworking.dll" Private="false" />
+    <Reference Include="PhotonRealtime" HintPath="$(ManagedDir)\PhotonRealtime.dll" Private="false" />
+    <Reference Include="Photon3Unity3D" HintPath="$(ManagedDir)\Photon3Unity3D.dll" Private="false" />
+    <Reference Include="BepInEx" HintPath="$(BepInExCore)\BepInEx.dll" Private="false" />
+    <Reference Include="0Harmony" HintPath="$(BepInExCore)\0Harmony.dll" Private="false" />
+  </ItemGroup>
+
+  <Target Name="CopyToPlugins" AfterTargets="Build">
+    <MakeDir Directories="$(PluginDir)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(PluginDir)" />
+    <Message Importance="high" Text="CartPilot -> $(PluginDir)" />
+  </Target>
+
+</Project>
