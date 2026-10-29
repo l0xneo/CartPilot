@@ -219,6 +219,26 @@ internal static class CartNavMesh
         Tick();
     }
 
+    /// <summary>True if the route runs through a blocked area (one not holding its start or end). The game mesh ignores blocked areas, so its routes are checked here.</summary>
+    internal static bool CrossesBlocked(List<Vector3> corners)
+    {
+        Vector3 Flat(Vector3 v) => new(v.x, 0f, v.z);
+        var start = corners[0];
+        var end = corners[corners.Count - 1];
+        foreach (var b in Blocked)
+        {
+            if (b.Expires < Time.time || Flat(start - b.Pos).magnitude < b.Radius || Flat(end - b.Pos).magnitude < b.Radius) continue;
+            for (int i = 0; i + 1 < corners.Count; i++)
+            {
+                Vector3 a = Flat(corners[i]), ab = Flat(corners[i + 1]) - a, p = Flat(b.Pos);
+                float t = ab.sqrMagnitude > 0f ? Mathf.Clamp01(Vector3.Dot(p - a, ab) / ab.sqrMagnitude) : 0f;
+                float y = Mathf.Lerp(corners[i].y, corners[i + 1].y, t);
+                if ((a + ab * t - p).magnitude < b.Radius * 0.9f && Mathf.Abs(y - b.Pos.y) < 2f) return true;
+            }
+        }
+        return false;
+    }
+
     /// <summary>Drops expired blocked areas and applies pending changes once no bake is running. Call regularly.</summary>
     internal static void Tick()
     {

@@ -52,6 +52,7 @@ internal static class PathPlanner
         string tierName = null;
         float bestGap = float.MaxValue;
         var complete = new List<(List<Vector3> c, NavMeshQueryFilter f, string name, float len)>();
+        (List<Vector3> c, NavMeshQueryFilter f, string name, float len) blockedFallback = default;
         foreach (var (f, tname) in new[] { (CartNavMesh.ComfortableFilter, "comfortable"), (CartNavMesh.TightFilter, "tight"), (CartNavMesh.SqueezeFilter, "squeeze"), (CartNavMesh.GameFilter, "game") })
         {
             if (!Sample(from, f, out var a) || !Sample(to, f, out var b)) continue;
@@ -62,6 +63,8 @@ internal static class PathPlanner
             if (NavPath.status == NavMeshPathStatus.PathComplete)
             {
                 var c = new List<Vector3>(NavPath.corners);
+                // A game-mesh route straight back through a blocked cart or enemy just drives into it again; use it only if nothing else works.
+                if (tname == "game" && CartNavMesh.CrossesBlocked(c)) { Verbose("Game mesh route goes through a blocked area, kept as last resort."); blockedFallback = (c, f, tname, Length(c)); continue; }
                 complete.Add((c, f, tname, Length(c)));
                 continue;
             }
@@ -74,6 +77,7 @@ internal static class PathPlanner
             tierName = tname;
             res.Partial = true;
         }
+        if (complete.Count == 0 && blockedFallback.c != null) complete.Add(blockedFallback);
         if (complete.Count > 0)
         {
             float shortest = float.MaxValue;
@@ -95,6 +99,8 @@ internal static class PathPlanner
 
         // Truck interior / inside extractions aren't on the cart mesh: finish with a straight off-mesh leg if the cart physically fits.
         if (res.Partial) TryOffMeshFinish(corners, to, shape, res);
+
+        Verbose($"Corners: {string.Join(" ", corners)}");
 
         // 2. Corner clearance, 3. densify, 4. stairs, 5. validate, 6. chokes.
         PushCornersOffWalls(corners, filter);
@@ -230,7 +236,10 @@ internal static class PathPlanner
                 var p = Vector3.Lerp(a, b, s / (float)steps);
                 // Real floor height matters for stair detection. Only take the height, and only when the point is
                 // actually on the mesh, so off-mesh legs aren't pulled back to the mesh edge.
-                if (s < steps && NavMesh.SamplePosition(p, out var hit, 1f, f) && Flat(hit.position - p).magnitude < 0.2f) p.y = hit.position.y;
+                // Sample from the previous point's height so it stays on the same surface: from the straight corner-to-corner
+                // height it could snap to the floor under the stairs, and that dip made Museum stair routes fail every time.
+                var probe = new Vector3(p.x, path[path.Count - 1].Pos.y, p.z);
+                if (s < steps && NavMesh.SamplePosition(probe, out var hit, 1f, f) && Flat(hit.position - p).magnitude < 0.2f) p.y = hit.position.y;
                 path.Add(new Waypoint(p));
             }
         }
@@ -254,7 +263,7 @@ internal static class PathPlanner
             // The cart already physically sits at the start; a short first hop from there isn't a reason to reject.
             if (i == 0 && Flat(path[1].Pos - path[0].Pos).magnitude < 1.5f) continue;
 
-            if (TryNudge(path, i + 1, shape, f) || TryNudge(path, i, shape, f)) continue;
+            if (TryNudge(path, i + 1, shape, f, clear, widthScale) || TryNudge(path, i, shape, f, clear, widthScale)) continue;
 
             SegmentHit(path[i].Pos, path[i + 1].Pos, shape, out var hit, clear, widthScale);
             if (TryStraighten(path, i, hit.point, shape, f, clear, widthScale, out float gap)) continue;
@@ -270,7 +279,7 @@ internal static class PathPlanner
 
     private static readonly float[] NudgeOffsets = { 0.2f, -0.2f, 0.4f, -0.4f, 0.6f, -0.6f };
 
-    private static bool TryNudge(List<Waypoint> path, int idx, CartShape shape, NavMeshQueryFilter f)
+    private static bool TryNudge(List<Waypoint> path, int idx, CartShape shape, NavMeshQueryFilter f, float clear, float widthScale)
     {
         if (idx <= 0 || idx >= path.Count - 1) return false; // never move the start or the goal
         var prev = path[idx - 1].Pos;
@@ -283,7 +292,8 @@ internal static class PathPlanner
             if (!NavMesh.SamplePosition(path[idx].Pos + side * o, out var hit, 0.3f, f)) continue;
             var c = hit.position;
             if (NavMesh.Raycast(prev, c, out _, f) || NavMesh.Raycast(c, next, out _, f)) continue;
-            if (!SegmentClear(prev, c, shape) || !SegmentClear(c, next, shape)) continue;
+            // Same clearance as the check that failed: on stairs the flat-floor box always hits the steps, so nudges there never passed.
+            if (!SegmentClear(prev, c, shape, clear, widthScale) || !SegmentClear(c, next, shape, clear, widthScale)) continue;
 
             var wp = path[idx];
             wp.Pos = c;

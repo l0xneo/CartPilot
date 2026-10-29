@@ -13,11 +13,14 @@ internal static class PlayerControllerUpdatePatch
         var kb = Keyboard.current;
         if (kb == null || ChatOpen()) return;
 
+        if (Cfg.SelectCartKey.Value != Key.None && kb[Cfg.SelectCartKey.Value].wasPressedThisFrame)
+            CartPilotController.SelectNext(__instance.transform.position);
+
         foreach (var (key, dest) in Cfg.DestinationKeys)
         {
             if (key.Value == Key.None || !kb[key.Value].wasPressedThisFrame) continue;
 
-            var cart = CartPilotController.Nearest(__instance.transform.position);
+            var cart = CartPilotController.Selected ?? CartPilotController.Nearest(__instance.transform.position);
             if (cart == null)
             {
                 Plugin.Log.LogInfo("No cart to command.");

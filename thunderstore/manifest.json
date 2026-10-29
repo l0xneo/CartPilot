@@ -1,6 +1,6 @@
 {
   "name": "CartPilot",
-  "version_number": "0.1.9",
+  "version_number": "0.2.9",
   "website_url": "https://discord.gg/gNum2WsuFZ",
   "description": "Cart drives itself to you, extraction or the truck.",
   "dependencies": ["BepInEx-BepInExPack-5.4.2305"]

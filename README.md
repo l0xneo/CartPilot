@@ -6,6 +6,7 @@ BepInEx mod for R.E.P.O. The cart drives itself to wherever you tell it.
 - G - to extraction, opens it, drives in
 - H - back to the truck
 - V - opens extraction, stays outside
+- B - switch which cart you control (shows the money in each)
 
 Keys and speeds are in `BepInEx/config/neo.cartpilot.cfg`. Logs go to `BepInEx/CartPilotLogs`.
 

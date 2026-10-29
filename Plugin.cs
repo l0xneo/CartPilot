@@ -12,7 +12,7 @@ public class Plugin : BaseUnityPlugin
 {
     public const string Guid = "neo.cartpilot";
     public const string Name = "Cart Pilot";
-    public const string Version = "0.1.9";
+    public const string Version = "0.2.9";
 
     internal static ManualLogSource Log;
 
@@ -39,6 +39,7 @@ internal static class Cfg
 {
     // Destination keys, iterated by the input patch.
     internal static readonly List<(ConfigEntry<Key> key, Destination dest)> DestinationKeys = new();
+    internal static ConfigEntry<Key> SelectCartKey;
 
     // Extraction choice
     internal static ConfigEntry<bool> ExtractionFurthestFromTruck;
@@ -81,6 +82,7 @@ internal static class Cfg
         DestinationKeys.Add((cfg.Bind("Keys", "GoToExtraction", Key.G, "Cart drives to the next extraction point, presses its button and drives inside."), Destination.Extraction));
         DestinationKeys.Add((cfg.Bind("Keys", "GoToTruck", Key.H, "Cart drives back inside the truck."), Destination.Truck));
         DestinationKeys.Add((cfg.Bind("Keys", "OpenExtraction", Key.V, "Cart drives to the next extraction point and presses its button, but stays outside."), Destination.ExtractionOpen));
+        SelectCartKey = cfg.Bind("Keys", "SelectCart", Key.B, "Switch which cart your keys command. Shows every cart and the money inside it. Until you pick one, the nearest cart is used.");
 
         ExtractionFurthestFromTruck = cfg.Bind("Extraction", "FurthestFromTruck", true,
             "Go to the unfinished extraction point furthest from the truck. Wins over ClosestToCart if both are on. An already active extraction always takes priority.");
@@ -98,7 +100,7 @@ internal static class Cfg
         DoorSpeed = cfg.Bind("Driving", "DoorSpeed", 2.5f, "Speed near doors (the cart smashes doors in its way).");
         Lookahead = cfg.Bind("Driving", "Lookahead", 1.6f, "Pure-pursuit lookahead distance at full speed (m).");
         StairsLookahead = cfg.Bind("Driving", "StairsLookahead", 0.6f, "Lookahead on stairs. Short = follows the stair centerline strictly.");
-        StairsUpAssist = cfg.Bind("Driving", "StairsUpAssist", 0.6f, "Fraction of cart+cargo weight countered while climbing stairs (0 = none, 1 = weightless).");
+        StairsUpAssist = cfg.Bind("Driving", "StairsUpAssist", 1f, "Fraction of cart+cargo weight countered while driving (0 = none, 1 = weightless). Height follows the path line either way.");
 
         BlockedReplanTime = cfg.Bind("Obstacles", "BlockedReplanTime", 2f, "Seconds the path (anywhere ahead, not just in front of the cart) stays blocked before the cart picks a new route.");
         ClearTimeBeforeResume = cfg.Bind("Obstacles", "ClearTimeBeforeResume", 1f, "Path must be clear this long before the cart moves again.");

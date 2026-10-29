@@ -369,6 +369,8 @@ internal partial class CartPilotController
     {
         if (c.attachedRigidbody == rb || c.transform.IsChildOf(transform)) return true; // own parts (e.g. its button)
         if (IsPushableItem(c)) return true;
+        var obj = c.GetComponentInParent<PhysGrabObject>();
+        if (obj != null && cart.itemsInCart.Contains(obj)) return true; // long cargo sticking out past the cart's front
         if (c.GetComponentInParent<ExtractionPoint>() != null) return true; // its button and frame sit right at the goal
         // The player we're driving to: arrival handles them, they're not an obstacle.
         return follow != null && c.gameObject.layer == LayerMask.NameToLayer("Player") && PathPlanner.Flat(c.transform.position - follow.position).magnitude < 1.5f;
@@ -445,7 +447,7 @@ internal partial class CartPilotController
 
         if (state != State.Idle) sb.Append($" goal=({goal.x:F1},{goal.y:F1},{goal.z:F1}) goalDist={PathPlanner.Flat(goal - p).magnitude:F1}");
         if (path != null && seg + 1 < path.Count)
-            sb.Append($" seg={seg}/{path.Count - 1} offPath={offPath:F2} left={RemainingLength():F1} stairs={path[seg].Stairs} choke={path[seg].Choke} door={path[seg].Door} room={path[seg].Room:F2}");
+            sb.Append($" seg={seg}/{path.Count - 1} offPath={offPath:F2}{offSide} aboveLine={pathHeight - restHeight:F2} left={RemainingLength():F1} stairs={path[seg].Stairs} choke={path[seg].Choke} door={path[seg].Door} room={path[seg].Room:F2}");
 
         sb.Append($" walls(f/b/l/r)={Wall(transform.forward)}/{Wall(-transform.forward)}/{Wall(-transform.right)}/{Wall(transform.right)}");
         sb.Append($" near=[{Nearby()}]");
@@ -501,9 +503,35 @@ internal partial class CartPilotController
     private void DiagTick()
     {
         CargoWatch();
+        DriftWatch();
         if ((diagTickTimer -= Time.fixedDeltaTime) > 0f) return;
         diagTickTimer = 1f;
         Diag("tick", "");
+    }
+
+    private float restHeight = float.NaN, driftMax, driftStart, liftMax, liftStart;
+    private bool drifting, lifting;
+
+    /// <summary>Logs DRIFT while the cart sways off its path line and LIFT while it bounces above it: one line when it starts, one with the worst value when it ends.</summary>
+    private void DriftWatch()
+    {
+        if (path == null || seg + 1 >= path.Count || state != State.Driving) { drifting = lifting = false; restHeight = float.NaN; return; }
+        // The pivot sits at some fixed height over the floor, so measure against the cart's usual height (slow average) rather than zero.
+        // Skip the first moments of a route: the cart is still turning onto the new line and settling on the floor (false DRIFT/LIFT at speed 0).
+        float flatSpeed = PathPlanner.Flat(rb.velocity).magnitude;
+        if (Time.time - lastPlanTime < 0.5f || (flatSpeed < 0.3f && !drifting && !lifting)) return;
+        if (float.IsNaN(restHeight)) restHeight = pathHeight;
+        float above = pathHeight - restHeight;
+        if (!lifting) restHeight = Mathf.Lerp(restHeight, pathHeight, Time.fixedDeltaTime * 0.5f);
+        var stats = $"speed={flatSpeed:F2} load={load:F2} cmdSpeed={commandedSpeed:F2} vy={rb.velocity.y:F2} spin={rb.angularVelocity.y * Mathf.Rad2Deg:F0}deg/s stairs={path[seg].Stairs}";
+
+        if (!drifting && offPath > 0.5f) { drifting = true; driftMax = 0f; driftStart = Time.time; Diag("DRIFT", $"start off={offPath:F2}{offSide} {stats}"); }
+        if (drifting) driftMax = Mathf.Max(driftMax, offPath);
+        if (drifting && offPath < 0.25f) { drifting = false; Diag("DRIFT", $"end max={driftMax:F2} for={Time.time - driftStart:F1}s {stats}"); }
+
+        if (!lifting && above > 0.2f) { lifting = true; liftMax = 0f; liftStart = Time.time; Diag("LIFT", $"start above={above:F2} {stats}"); }
+        if (lifting) liftMax = Mathf.Max(liftMax, above);
+        if (lifting && above < 0.08f) { lifting = false; Diag("LIFT", $"end max={liftMax:F2} air={Time.time - liftStart:F1}s {stats}"); }
     }
 
     /// <summary>Logs CARGO when items leave the cart or lose value (breaking) while driving, with the spin and speed that caused it.</summary>

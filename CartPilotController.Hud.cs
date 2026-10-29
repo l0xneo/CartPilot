@@ -59,8 +59,12 @@ internal partial class CartPilotController
     private static readonly Color HudFail = new(0.95f, 0.3f, 0.3f);
     private static GUIStyle hudLabel;
 
+    private static float pickerUntil;
+
     private void OnGUI()
     {
+        // The cart list is shared, so only the first cart draws it.
+        if (Time.time < pickerUntil && All.Count > 0 && All[0] == this && Event.current.type == EventType.Repaint) DrawPicker();
         if (!Cfg.HudEnabled.Value || hud == HudState.Hidden) return;
         if (Time.time > hudUntil) { hud = HudState.Hidden; return; }
         if (Event.current.type != EventType.Repaint) return;
@@ -98,6 +102,36 @@ internal partial class CartPilotController
         textColor.a = 0.9f * a;
         GUI.color = textColor;
         GUI.Label(new Rect(tx + len + 10f * s, y, textW, h), text, hudLabel);
+        GUI.color = Color.white;
+    }
+
+    /// <summary>List of carts with the money inside each, the selected one highlighted.</summary>
+    private static void DrawPicker()
+    {
+        var list = Numbered();
+        var sel = Selected;
+        float s = Cfg.HudScale.Value * Screen.height / 1080f;
+        float a = Mathf.Clamp01((pickerUntil - Time.time) / 0.4f);
+        float rowH = 24f * s, pad = 10f * s, w = 170f * s, h = pad * 2f + rowH * list.Count;
+        float x = Cfg.HudX.Value * Screen.width - w / 2f, y = Cfg.HudY.Value * Screen.height + 40f * s;
+
+        Round(x, y, w, h, 12f * s, HudPanel, a);
+        hudLabel ??= new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleLeft, fontStyle = FontStyle.Bold };
+        hudLabel.fontSize = Mathf.RoundToInt(13f * s);
+        for (int i = 0; i < list.Count; i++)
+        {
+            float ry = y + pad + i * rowH;
+            bool on = list[i] == sel;
+            if (on) Round(x + 4f * s, ry, w - 8f * s, rowH, rowH / 2f, new Color(HudCart.r, HudCart.g, HudCart.b, 0.25f), a);
+            var c = on ? HudCart : Color.white;
+            c.a = (on ? 1f : 0.7f) * a;
+            GUI.color = c;
+            hudLabel.alignment = TextAnchor.MiddleLeft;
+            GUI.Label(new Rect(x + pad + 4f * s, ry, w, rowH), $"Cart {i + 1}", hudLabel);
+            hudLabel.alignment = TextAnchor.MiddleRight;
+            GUI.Label(new Rect(x, ry, w - pad - 4f * s, rowH), $"${list[i].cart.haulCurrent:N0}", hudLabel);
+        }
+        hudLabel.alignment = TextAnchor.MiddleLeft;
         GUI.color = Color.white;
     }
 

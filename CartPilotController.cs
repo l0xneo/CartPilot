@@ -59,6 +59,28 @@ internal partial class CartPilotController : MonoBehaviourPun
         return best;
     }
 
+    // Picked with the SelectCart key, per client. Unity null-check: a destroyed cart reads as null.
+    private static CartPilotController selected;
+    internal static CartPilotController Selected => selected != null && All.Contains(selected) ? selected : null;
+
+    /// <summary>Carts in a fixed order so "Cart 1" is the same cart on every press and every client.</summary>
+    internal static List<CartPilotController> Numbered()
+    {
+        var list = new List<CartPilotController>(All);
+        list.Sort((a, b) => a.photonView.ViewID.CompareTo(b.photonView.ViewID));
+        return list;
+    }
+
+    internal static void SelectNext(Vector3 playerPos)
+    {
+        var list = Numbered();
+        if (list.Count == 0) return;
+        // First press picks the cart that was already being used (the nearest), later presses move on.
+        var current = Selected;
+        selected = current == null ? Nearest(playerPos) : list[(list.IndexOf(current) + 1) % list.Count];
+        pickerUntil = Time.time + 3f;
+    }
+
     // ---------- Commands ----------
 
     internal void SendCommand(Destination dest, Vector3 playerPos)
@@ -159,6 +181,8 @@ internal partial class CartPilotController : MonoBehaviourPun
     private int seg;          // current path segment (path[seg] -> path[seg+1])
     private float segT;       // 0..1 along it
     private float offPath;    // horizontal distance from the path
+    private string offSide;   // which side of the path the cart is on
+    private float pathHeight; // cart height above the path line
     private bool facingBack;  // driving with the cart's back end first
     private float lastPlanTime;
     private float followCheckTimer;
@@ -398,15 +422,20 @@ internal partial class CartPilotController : MonoBehaviourPun
 
         bool stairs = StairsNear(1.5f);
         float speed = TargetSpeed(remaining, stairs);
-        float look = stairs ? Cfg.StairsLookahead.Value : Mathf.Lerp(0.8f, Cfg.Lookahead.Value, speed / Mathf.Max(0.1f, Cfg.MaxSpeed.Value));
+        // Heavy cargo shoves the cart back and it answers steering late, so it overshot the line side to side (2 kg cart, 10 kg cargo: up to 1.3 m off).
+        // Aim further ahead, steer softer and drive a bit slower when loaded.
+        load = Mathf.Clamp01((CargoMass() - rb.mass) / Mathf.Max(0.1f, rb.mass) / 5f);
+        speed *= Mathf.Lerp(1f, 0.75f, load);
+        float look = stairs ? Cfg.StairsLookahead.Value : Mathf.Lerp(0.8f, Cfg.Lookahead.Value, speed / Mathf.Max(0.1f, Cfg.MaxSpeed.Value)) * (1f + 0.6f * load);
         var target = PointAhead(look);
         debug?.SetLookahead(target);
 
         var travel = PathPlanner.Flat(target - transform.position).normalized;
         if (CheckObstacles(travel)) return;
 
+        climbing = stairs || PointAhead(1.2f).y > PointAhead(0f).y + 0.05f;
         Steer(target, speed);
-        if (stairs) StairsAssist();
+        HoldHeight();
         CheckStuck(travel);
     }
 
@@ -424,7 +453,7 @@ internal partial class CartPilotController : MonoBehaviourPun
         var body = facingBack ? -fwd : fwd;
 
         float yawErr = Vector3.SignedAngle(body, dir, Vector3.up);
-        float yawRate = Mathf.Clamp(yawErr * Mathf.Deg2Rad * 6f, -4f, 4f);
+        float yawRate = Mathf.Clamp(yawErr * Mathf.Deg2Rad * Mathf.Lerp(6f, 3f, load), -4f, 4f);
         SetYawRate(yawRate);
 
         float align = Mathf.Clamp01(1f - (Mathf.Abs(yawErr) - 25f) / 50f); // full speed under 25 deg, turn in place only past 75
@@ -433,6 +462,15 @@ internal partial class CartPilotController : MonoBehaviourPun
     }
 
     private float yawCmd;
+    private float load; // 0 empty .. 1 cargo at 5x the cart's mass
+
+    private float CargoMass()
+    {
+        float mass = rb.mass;
+        foreach (var item in cart.itemsInCart)
+            if (item != null && item.rb != null) mass += item.rb.mass;
+        return mass;
+    }
 
     private void SetYawRate(float yawRate)
     {
@@ -452,7 +490,7 @@ internal partial class CartPilotController : MonoBehaviourPun
         var v = rb.velocity;
         // Strong enough to get over step edges; the game's own pull uses far more (up to 2 m/s per step).
         // Gentle, so cargo isn't jolted (guns in the cart fire on hard knocks); the hard push is only for climbing stairs.
-        float accel = state == State.Driving && StairsNear(1.5f) ? 30f : 10f; // 5 lost to floor friction and topped out near 2 m/s
+        float accel = state == State.Driving && climbing ? 30f : 10f; // 5 lost to floor friction and topped out near 2 m/s
         var flat = Vector3.MoveTowards(new Vector3(v.x, 0f, v.z), horizontal, accel * Time.fixedDeltaTime);
         rb.velocity = new Vector3(flat.x, v.y, flat.z);
     }
@@ -478,22 +516,35 @@ internal partial class CartPilotController : MonoBehaviourPun
         return Mathf.Max(speed, Mathf.Min(Cfg.MinSpeed.Value, 0.5f));
     }
 
-    private void StairsAssist()
+    private bool climbing;
+
+    private float stallTimer, stepUpTimer;
+
+    /// <summary>
+    /// Weightless driving, like a player's grab: cart and cargo weight are cancelled and vertical speed follows the path line,
+    /// so it rises with stairs and ramps without being launched (LIFT) and settles back once it floats above the line.
+    /// </summary>
+    private void HoldHeight()
     {
-        var a = path[seg].Pos;
-        var b = path[Mathf.Min(seg + 1, path.Count - 1)].Pos;
-        float run = PathPlanner.Flat(b - a).magnitude;
-        if (b.y <= a.y + 0.05f || run < 0.05f) return; // only when climbing
+        var here = PointAhead(0f);
+        var ahead = PointAhead(1.2f);
+        float run = PathPlanner.Flat(ahead - here).magnitude;
+        // At least 1 m/s along a climb so a slow or heavy cart still gets up.
+        float slopeVy = run > 0.05f ? Mathf.Max(commandedSpeed, climbing ? 1f : 0f) * (ahead.y - here.y) / run : 0f;
 
-        // Drive along the slope, not just horizontally, so the cart rides up over the step edges.
-        float climb = commandedSpeed * (b.y - a.y) / run;
-        if (rb.velocity.y < climb) rb.velocity = new Vector3(rb.velocity.x, climb, rb.velocity.z);
+        float above = float.IsNaN(restHeight) ? 0f : pathHeight - restHeight;
+        // Dead band near the line so it doesn't grind into the floor; pull down only once it clearly floats.
+        float correct = above > 0.15f ? -(above - 0.05f) * 3f : above < -0.05f ? -above * 4f : 0f;
+        float target = Mathf.Clamp(slopeVy + correct, -2f, 3f);
 
-        if (Cfg.StairsUpAssist.Value <= 0f) return;
-        float mass = rb.mass;
-        foreach (var item in cart.itemsInCart)
-            if (item != null && item.rb != null) mass += item.rb.mass;
-        rb.AddForce(Vector3.up * (Cfg.StairsUpAssist.Value * mass * -Physics.gravity.y));
+        // Low lips (thresholds, small ledges) aren't on the path line and sit under the forward probes: pushing without moving means hop up over it.
+        float flatSpeed = PathPlanner.Flat(rb.velocity).magnitude;
+        stallTimer = commandedSpeed > 0.4f && flatSpeed < 0.2f ? stallTimer + Time.fixedDeltaTime : 0f;
+        if (stallTimer > 0.5f && stepUpTimer <= 0f && above < 0.3f) { stepUpTimer = 0.25f; stallTimer = 0f; Diag("STEP", $"stalled at a low edge, stepping up above={above:F2}"); }
+        if (stepUpTimer > 0f) { stepUpTimer -= Time.fixedDeltaTime; target = Mathf.Max(target, 1.2f); }
+
+        rb.velocity = new Vector3(rb.velocity.x, Mathf.MoveTowards(rb.velocity.y, target, 15f * Time.fixedDeltaTime), rb.velocity.z);
+        if (Cfg.StairsUpAssist.Value > 0f) rb.AddForce(Vector3.up * (Cfg.StairsUpAssist.Value * CargoMass() * -Physics.gravity.y));
     }
 
     private void UpdateProgress()
@@ -507,9 +558,10 @@ internal partial class CartPilotController : MonoBehaviourPun
             var ab = b - a;
             float t = ab.sqrMagnitude > 0f ? Mathf.Clamp01(Vector3.Dot(pos - a, ab) / ab.sqrMagnitude) : 0f;
             float d = (a + ab * t - pos).magnitude;
-            if (d < best) { best = d; seg = i; segT = t; }
+            if (d < best) { best = d; seg = i; segT = t; offSide = Vector3.Cross(ab, pos - a - ab * t).y > 0f ? "right" : "left"; }
         }
         offPath = best;
+        pathHeight = transform.position.y - Mathf.Lerp(path[seg].Pos.y, path[seg + 1].Pos.y, segT);
     }
 
     /// <summary>Point on the path <paramref name="dist"/> meters (horizontal) past the cart's closest point.</summary>
